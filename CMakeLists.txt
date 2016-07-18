@@ -111,11 +111,12 @@ file(GLOB_RECURSE dbot_ros_HEADERS
 
 set(dbot_ros_SOURCES
     source/${PROJECT_NAME}/object_tracker_ros.cpp
-    source/${PROJECT_NAME}/object_tracker_publisher.cpp 
+    source/${PROJECT_NAME}/object_tracker_publisher.cpp
     source/${PROJECT_NAME}/util/ros_camera_data_provider.cpp
     source/${PROJECT_NAME}/util/data_set_camera_data_provider.cpp
     source/${PROJECT_NAME}/util/ros_interface.cpp
-    source/${PROJECT_NAME}/util/tracking_dataset.cpp)
+    source/${PROJECT_NAME}/util/tracking_dataset.cpp
+    source/${PROJECT_NAME}/pole_tracker.cpp)
 
 add_library(${PROJECT_NAME}
   ${dbot_ros_HEADERS}
@@ -127,6 +128,17 @@ add_dependencies(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES})
+
+  add_executable(pole_tracker
+    source/${PROJECT_NAME}/pole_tracker.cpp)
+  add_dependencies(pole_tracker
+    dbot_ros_generate_messages_cpp)
+  target_link_libraries(pole_tracker
+    ${PROJECT_NAME}
+    ${catkin_LIBRARIES}
+    ${OpenCV_LIBS}
+    ${PCL_LIBRARIES}
+    yaml-cpp)
 
 add_executable(rbc_particle_filter_object_tracker
   source/${PROJECT_NAME}/tracker/rbc_particle_filter_object_tracker_node.cpp)
@@ -171,4 +183,3 @@ target_link_libraries(object_tracker_controller_service
   ${OpenCV_LIBS}
   ${PCL_LIBRARIES}
   yaml-cpp)
-

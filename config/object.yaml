@@ -2,6 +2,4 @@
 object:
   package:    sab_data
   directory:  object_models
-  meshes:     [ mugbox.obj ]
-
-
+  meshes:     [ test_target_kinect_6.obj ]
