@@ -1,0 +1,3 @@
+<launch>
+  <node name="pole_tracker" pkg="dbot_ros" type="pole_tracker" output="screen" />
+</launch>

@@ -1,0 +1,5 @@
+
+object:
+  package:    sab_data
+  directory:  object_models
+  meshes:     [ sphere130_0.6k.obj ]
