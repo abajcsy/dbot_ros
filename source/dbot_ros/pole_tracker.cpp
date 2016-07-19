@@ -34,9 +34,12 @@
 #include <ros/package.h>
 #include <tf/transform_broadcaster.h>
 
-#define OBJ_TOPIC "/rbc_particle_filter_object_tracker/object_model"
+#define PARTICLE_OBJ_TOPIC "/rbc_particle_filter_object_tracker/object_model"
+#define GAUSS_OBJ_TOPIC "/rms_gaussian_filter_object_tracker/object_model"
+
 #define KINECT_FRAME "/XTION_RGB"
-#define POLE_ANGLE_TOPIC "pole_angle_kinect"
+
+#define SIGN -1.0
 
 #define PI 3.14159265359
 #define CALIB_EPSILON 0.03
@@ -47,6 +50,10 @@ private:
    ros::NodeHandle nh;
    ros::Subscriber object_sub;
    ros::Publisher pole_angle_pub;
+
+   // for switching between tracker types and pole_angle topics
+   std::string tracker_topic;
+   std::string pole_angle_topic;
 
    // for keeping basic metrics about angle measurements
    double num_measurements;
@@ -59,15 +66,24 @@ private:
 public:
 
    // set up publishers and subscribers
-   PoleTracker(ros::NodeHandle &node_handle){
+   PoleTracker(ros::NodeHandle &node_handle, std::string tracker, std::string pole_topic){
+      // save which object tracker we are using
+      tracker_topic = PARTICLE_OBJ_TOPIC;
+      if(tracker.compare("gaussian") == 0){
+         tracker_topic = GAUSS_OBJ_TOPIC;
+      }
+      // save topic to which we are publishing the pole angle
+      pole_angle_topic = pole_topic;
+
+      // for basic statistics
       num_measurements = 0.0;
       angle_sum = 0.0;
 
+      // start ROS and initialize publisher/subscriber
       start = ros::Time::now();
-
       nh = node_handle;
-      object_sub = nh.subscribe<visualization_msgs::Marker>(OBJ_TOPIC, 1000, &PoleTracker::get_angle_callback, this);
-      pole_angle_pub = nh.advertise<std_msgs::Float64>(POLE_ANGLE_TOPIC, 1000);
+      object_sub = nh.subscribe<visualization_msgs::Marker>(tracker_topic, 1000, &PoleTracker::get_angle_callback, this);
+      pole_angle_pub = nh.advertise<std_msgs::Float64>(pole_angle_topic, 1000);
    }
 
    // gets the angle of the pole
@@ -76,8 +92,6 @@ public:
       if(!msg){
          return;
       }
-      // header for timestamp
-      std_msgs::Header header = msg->header;
 
       // get position and orientation of tracked object
       geometry_msgs::Point pos = (msg->pose).position;
@@ -93,9 +107,9 @@ public:
 
       // TODO THIS IS KIND OF HACKEY
       // need to match the kinect frame orientation with the pole frame
-      // so rotate tf quaternion around z-axis by 180 degrees to match camera
-      tf::Quaternion rotate_180_z = tf::createQuaternionFromRPY(0,PI,PI);
-      quat = rotate_180_z * quat;
+      // so rotate tf quaternion around y and z-axis by 180 degrees to match camera
+      tf::Quaternion rotate_180_yz = tf::createQuaternionFromRPY(0,PI,PI);
+      quat = rotate_180_yz * quat;
 
       // the tf::Quaternion has a method to acess roll pitch and yaw
       double roll, pitch, yaw;
@@ -110,26 +124,25 @@ public:
       btScalar angle = quat.getAngle();
       tf::Vector3 axis = quat.getAxis();
 
-      ROS_INFO("Roll: %f, Pitch: %f, Yaw: %f", rpy.x, rpy.y, rpy.z);
+      // a good calibration means that the plane of camera and plane of pole are paralell
       if(fabs(rpy.x) <= CALIB_EPSILON && fabs(rpy.y) <= CALIB_EPSILON && fabs(rpy.z) <= CALIB_EPSILON){
-            ROS_INFO("GOOD CALIBRATION");
+            ROS_INFO("----------------------------------------");
+            ROS_INFO("----------- GOOD CALIBRATION -----------");
+            ROS_INFO("----------------------------------------");
       }
 
-      // TODO: IS THIS A CORRECT ASSUMPTION FOR WHAT CONTROLLER NEEDS?
-      // note:
+      // note, we multiply by SIGN in order to get:
       //    - rad = pole is tilted to left (from camera POV)
       //    0 rad = pole is perfectly vertical
       //    + rad = pole is tilted to right
-      double final_angle = -1.0*rpy.z;
-      /*if(final_angle > PI){
-         final_angle -= 2*PI;
-      }*/
+      double final_angle = SIGN*rpy.z;
 
-
-      ROS_INFO("Quaternion Angle (rad): %f", angle);
-      ROS_INFO("             Yaw Angle: %f", final_angle);
-      ROS_INFO("                 (deg): %f", final_angle*180/PI);
-      ROS_INFO("       Quaternion Axis: [%f, %f, %f]", axis.getX(), axis.getY(), axis.getZ());
+      //ROS_INFO("Quaternion Angle (rad): %f", angle);
+      ROS_INFO("              Roll (rad): %f", rpy.x);
+      ROS_INFO("             Pitch (rad): %f", rpy.y);
+      ROS_INFO("        [Sign] Yaw (rad): %f", final_angle);
+      ROS_INFO("                   (deg): %f", final_angle*180/PI);
+      //ROS_INFO("       Quaternion Axis: [%f, %f, %f]", axis.getX(), axis.getY(), axis.getZ());
       std::cout << std::endl;
 
 
@@ -142,21 +155,16 @@ public:
       tf::Quaternion q;
       q.setRPY(rpy.x, rpy.y, rpy.z);
       transform.setRotation(q);
-      br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), KINECT_FRAME, OBJ_TOPIC));
+      br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), KINECT_FRAME, tracker_topic));
 
       pole_angle_pub.publish(final_angle);
    }
 
    void run(){
 
-      ROS_INFO("----------------------------------------------------------------");
-      ROS_INFO("Calibrating to 0.0 degrees = paralell vision and plane of motion");
-
       while(nh.ok()){
             ros::spin();
       }
-
-      ROS_INFO("----------------------------------------------------------------");
 
       // print basic stats about angle measurements
       end = ros::Time::now();
@@ -179,14 +187,14 @@ public:
 
       // TODO CHECK THIS -- I THINK SOMETHING IS WRONG BECAUSE THE MEASURES ARE TOO LARGE
       std::cout << std::endl;
-      std::cout << "----------- EXPERIMENTAL RESULTS -----------" << std::endl;
-      std::cout << "        Duration (secs): " << (end-start) << std::endl;
-      std::cout << "      Number of samples: " << num_measurements << std::endl;
-      std::cout << "       Angle mean (rad): " << angle_mean << std::endl;
-      std::cout << "                  (deg): " << (angle_mean*180/PI) << std::endl;
-      std::cout << "    Angle std_dev (rad): " << std_dev << std::endl;
-      std::cout << "                  (deg): " << (std_dev*180/PI) << std::endl;
-      std::cout << "--------------------------------------------" << std::endl;
+      std::cout << "------------ EXPERIMENTAL RESULTS -----------" << std::endl;
+      std::cout << "           Duration (secs): " << (end-start) << std::endl;
+      std::cout << "         Number of samples: " << num_measurements << std::endl;
+      std::cout << "      Yaw Angle mean (rad): " << angle_mean << std::endl;
+      std::cout << "                     (deg): " << (angle_mean*180/PI) << std::endl;
+      std::cout << "   Yaw Angle std_dev (rad): " << std_dev << std::endl;
+      std::cout << "                     (deg): " << (std_dev*180/PI) << std::endl;
+      std::cout << "---------------------------------------------" << std::endl;
       std::cout << std::endl;
 
       angle_data.clear();
@@ -198,6 +206,16 @@ int main(int argc, char** argv) {
    ros::init(argc, argv, "pole_tracker");
    ros::NodeHandle node_handle;
 
-   PoleTracker driver(node_handle);
+   if(argc != 3){
+      ROS_ERROR("Not enough arguments!");
+      ROS_ERROR("Usage:                      pole_tracker <tracker_type> <pole_angle_topic>");
+      ROS_ERROR("Supported tracker types:    particle or gaussian");
+      ros::shutdown();
+   }
+
+   std::string tracker = argv[1];
+   std::string pole_topic = argv[2];
+
+   PoleTracker driver(node_handle, tracker, pole_topic);
    driver.run();
 }
