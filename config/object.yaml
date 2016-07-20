@@ -2,4 +2,4 @@
 object:
   package:    sab_data
   directory:  object_models
-  meshes:     [ test_target_kinect_6.obj ]
+  meshes:     [ balancing_pole_kinect_3.obj ]
