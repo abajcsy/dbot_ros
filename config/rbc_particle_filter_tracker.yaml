@@ -1,6 +1,6 @@
 
 particle_filter:
-  use_gpu: false 
+  use_gpu: true 
 
   cpu:
     sample_count: 100
@@ -21,7 +21,7 @@ particle_filter:
   # State moving average update rate in [0.0; 1.0]
   #   1: unfiltered wiggly estimates.
   #   0: constant
-  moving_average_update_rate: 0.8
+  moving_average_update_rate: 1.0
 
   max_kl_divergence: 2.0
 
@@ -36,8 +36,8 @@ particle_filter:
       sigma_factor: 0.0014247 #0.0014247
 
   object_transition:
-    linear_sigma: 0.0025
-    angular_sigma: 0.02
+    linear_sigma: 0.001 #0.0025
+    angular_sigma: 0.002 #0.02
     velocity_factor: 0.8
 
   object_color:
