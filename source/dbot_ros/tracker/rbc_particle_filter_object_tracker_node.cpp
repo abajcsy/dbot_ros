@@ -66,6 +66,10 @@ int main(int argc, char** argv)
     /*    - Filter builder                                                    */
     /* ---------------------------------------------------------------------- */
 
+    // parameter shorthand prefix
+    std::string pre = "particle_filter/";
+
+
     /* ------------------------------ */
     /* - Create the object model    - */
     /* ------------------------------ */
@@ -89,8 +93,10 @@ int main(int argc, char** argv)
 
     // Load the model usign the simple wavefront load and center the frames
     // of all object part meshes
-    auto object_model =
-        std::make_shared<dbot::ObjectModel>(object_model_loader, true);
+    bool center_object_frame;
+    nh.getParam(pre + "center_object_frame", center_object_frame);
+    auto object_model = std::make_shared<dbot::ObjectModel>(
+        object_model_loader, center_object_frame);
 
     /* ------------------------------ */
     /* - Setup camera data          - */
@@ -122,18 +128,16 @@ int main(int argc, char** argv)
     typedef osr::FreeFloatingRigidBodiesState<> State;
     typedef dbot::RbcParticleFilterObjectTracker Tracker;
     typedef dbot::RbcParticleFilterTrackerBuilder<Tracker> TrackerBuilder;
-    typedef TrackerBuilder::StateTransitionBuilder StateTransitionBuilder;
-    typedef TrackerBuilder::ObservationModelBuilder ObservationModelBuilder;
+    typedef TrackerBuilder::TransitionBuilder TransitionBuilder;
+    typedef TrackerBuilder::SensorBuilder SensorBuilder;
 
-    // parameter shorthand prefix
-    std::string pre = "particle_filter/";
 
     /* ------------------------------ */
     /* - State transition function  - */
     /* ------------------------------ */
     // We will use a linear observation model built by the object transition
     // model builder. The linear model will generate a random walk.
-    dbot::ObjectTransitionModelBuilder<State>::Parameters params_state;
+    dbot::ObjectTransitionBuilder<State>::Parameters params_state;
     nh.getParam(pre + "object_transition/linear_sigma",
                 params_state.linear_sigma);
     nh.getParam(pre + "object_transition/angular_sigma",
@@ -142,13 +146,13 @@ int main(int argc, char** argv)
                 params_state.velocity_factor);
     params_state.part_count = object_meshes.size();
 
-    auto state_trans_builder = std::shared_ptr<StateTransitionBuilder>(
-        new dbot::ObjectTransitionModelBuilder<State>(params_state));
+    auto state_trans_builder = std::shared_ptr<TransitionBuilder>(
+        new dbot::ObjectTransitionBuilder<State>(params_state));
 
     /* ------------------------------ */
     /* - Observation model          - */
     /* ------------------------------ */
-    dbot::RbObservationModelBuilder<State>::Parameters params_obsrv;
+    dbot::RbSensorBuilder<State>::Parameters params_obsrv;
     nh.getParam(pre + "use_gpu", params_obsrv.use_gpu);
 
     if (params_obsrv.use_gpu)
@@ -185,8 +189,8 @@ int main(int argc, char** argv)
     nh.getParam(pre + "gpu/geometry_shader_file",
                 params_obsrv.geometry_shader_file);
 
-    auto obsrv_model_builder = std::shared_ptr<ObservationModelBuilder>(
-        new dbot::RbObservationModelBuilder<State>(
+    auto sensor_builder =
+        std::shared_ptr<SensorBuilder>(new dbot::RbSensorBuilder<State>(
             object_model, camera_data, params_obsrv));
 
     /* ------------------------------ */
@@ -197,9 +201,10 @@ int main(int argc, char** argv)
     nh.getParam(pre + "moving_average_update_rate",
                 params_tracker.moving_average_update_rate);
     nh.getParam(pre + "max_kl_divergence", params_tracker.max_kl_divergence);
+    nh.getParam(pre + "center_object_frame", params_tracker.center_object_frame);
 
     auto tracker_builder = dbot::RbcParticleFilterTrackerBuilder<Tracker>(
-        state_trans_builder, obsrv_model_builder, object_model, params_tracker);
+        state_trans_builder, sensor_builder, object_model, params_tracker);
     auto tracker = tracker_builder.build();
 
     dbot::ObjectTrackerRos<Tracker> ros_object_tracker(
