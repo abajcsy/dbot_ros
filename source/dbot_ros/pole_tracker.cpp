@@ -18,6 +18,7 @@
 
 #include <vector>
 #include <cmath>
+#include <stdlib.h>
 
 #include <ros/ros.h>
 #include <std_msgs/String.h>
@@ -39,9 +40,12 @@
 
 #define KINECT_FRAME "/XTION_RGB"
 
-#define SIGN -1.0
-
+#define SIGN 1.0
 #define PI 3.14159265359
+
+#define ROLL_BASELINE 1.5708
+#define PITCH_BASELINE 0.0
+#define YAW_BASELINE 0.0
 #define CALIB_EPSILON 0.03
 
 class PoleTracker{
@@ -55,6 +59,9 @@ private:
    std::string tracker_topic;
    std::string pole_angle_topic;
 
+   // for adjusting for angle offset after calibration
+   double pole_angle_offset;
+
    // for keeping basic metrics about angle measurements
    double num_measurements;
    double angle_sum;
@@ -66,7 +73,7 @@ private:
 public:
 
    // set up publishers and subscribers
-   PoleTracker(ros::NodeHandle &node_handle, std::string tracker, std::string pole_topic){
+   PoleTracker(ros::NodeHandle &node_handle, std::string tracker, std::string pole_topic, std::string angle_offset){
       // save which object tracker we are using
       tracker_topic = PARTICLE_OBJ_TOPIC;
       if(tracker.compare("gaussian") == 0){
@@ -74,6 +81,9 @@ public:
       }
       // save topic to which we are publishing the pole angle
       pole_angle_topic = pole_topic;
+
+      // set the pole angle offset
+      pole_angle_offset = atof(angle_offset.c_str());
 
       // for basic statistics
       num_measurements = 0.0;
@@ -108,7 +118,7 @@ public:
       // TODO THIS IS KIND OF HACKEY
       // need to match the kinect frame orientation with the pole frame
       // so rotate tf quaternion around y and z-axis by 180 degrees to match camera
-      tf::Quaternion rotate_180_yz = tf::createQuaternionFromRPY(0,PI,PI);
+      tf::Quaternion rotate_180_yz = tf::createQuaternionFromRPY(0,-PI/6,0);
       quat = rotate_180_yz * quat;
 
       // the tf::Quaternion has a method to acess roll pitch and yaw
@@ -124,8 +134,14 @@ public:
       btScalar angle = quat.getAngle();
       tf::Vector3 axis = quat.getAxis();
 
+      bool good_roll = (fabs(rpy.x) >= ROLL_BASELINE-CALIB_EPSILON && fabs(rpy.x) <= ROLL_BASELINE+CALIB_EPSILON);
+      bool good_pitch = (fabs(rpy.y) >= PITCH_BASELINE-CALIB_EPSILON && fabs(rpy.y) <= PITCH_BASELINE+CALIB_EPSILON);
+      bool good_yaw = (fabs(rpy.z) >= YAW_BASELINE-CALIB_EPSILON && fabs(rpy.z) <= YAW_BASELINE+CALIB_EPSILON);
+      ROS_INFO("pole_angle_offset: %f", pole_angle_offset);
+      ROS_INFO("r: %d, p: %d, y: %d", good_roll, good_pitch, good_yaw);
+
       // a good calibration means that the plane of camera and plane of pole are paralell
-      if(fabs(rpy.x) <= CALIB_EPSILON && fabs(rpy.y) <= CALIB_EPSILON && fabs(rpy.z) <= CALIB_EPSILON){
+      if(good_roll && good_pitch && good_yaw){
             ROS_INFO("----------------------------------------");
             ROS_INFO("----------- GOOD CALIBRATION -----------");
             ROS_INFO("----------------------------------------");
@@ -135,13 +151,14 @@ public:
       //    - rad = pole is tilted to left (from camera POV)
       //    0 rad = pole is perfectly vertical
       //    + rad = pole is tilted to right
-      double final_angle = SIGN*rpy.z;
+      double final_angle = (SIGN*rpy.z)-pole_angle_offset; 
 
       //ROS_INFO("Quaternion Angle (rad): %f", angle);
       ROS_INFO("              Roll (rad): %f", rpy.x);
       ROS_INFO("             Pitch (rad): %f", rpy.y);
-      ROS_INFO("        [Sign] Yaw (rad): %f", final_angle);
-      ROS_INFO("                   (deg): %f", final_angle*180/PI);
+      ROS_INFO("        [Sign] Yaw (rad): %f", SIGN*rpy.z);
+      ROS_INFO("            (rad-offset): %f", final_angle);
+      ROS_INFO("       (deg with offset): %f", final_angle*180/PI);
       //ROS_INFO("       Quaternion Axis: [%f, %f, %f]", axis.getX(), axis.getY(), axis.getZ());
       std::cout << std::endl;
 
@@ -185,16 +202,21 @@ public:
       }
       std_dev = sqrt(sum_dev/num_measurements);
 
+      std::string tt_str = "Particle";
+      if(tracker_topic.compare(GAUSS_OBJ_TOPIC) == 0){
+         tt_str = "Gaussian";
+      }
+
       // TODO CHECK THIS -- I THINK SOMETHING IS WRONG BECAUSE THE MEASURES ARE TOO LARGE
       std::cout << std::endl;
-      std::cout << "------------ EXPERIMENTAL RESULTS -----------" << std::endl;
-      std::cout << "           Duration (secs): " << (end-start) << std::endl;
-      std::cout << "         Number of samples: " << num_measurements << std::endl;
-      std::cout << "      Yaw Angle mean (rad): " << angle_mean << std::endl;
-      std::cout << "                     (deg): " << (angle_mean*180/PI) << std::endl;
-      std::cout << "   Yaw Angle std_dev (rad): " << std_dev << std::endl;
-      std::cout << "                     (deg): " << (std_dev*180/PI) << std::endl;
-      std::cout << "---------------------------------------------" << std::endl;
+      std::cout << "------------ " << tt_str << " EXPERIMENTAL RESULTS -----------" << std::endl;
+      std::cout << "             Duration (secs): " << (end-start) << std::endl;
+      std::cout << "           Number of samples: " << num_measurements << std::endl;
+      std::cout << "        Yaw Angle mean (rad): " << angle_mean << std::endl;
+      std::cout << "                       (deg): " << (angle_mean*180/PI) << std::endl;
+      std::cout << "     Yaw Angle std_dev (rad): " << std_dev << std::endl;
+      std::cout << "                       (deg): " << (std_dev*180/PI) << std::endl;
+      std::cout << "------------------------------------------------------" << std::endl;
       std::cout << std::endl;
 
       angle_data.clear();
@@ -206,16 +228,17 @@ int main(int argc, char** argv) {
    ros::init(argc, argv, "pole_tracker");
    ros::NodeHandle node_handle;
 
-   if(argc != 3){
+   if(argc != 4){
       ROS_ERROR("Not enough arguments!");
-      ROS_ERROR("Usage:                      pole_tracker <tracker_type> <pole_angle_topic>");
+      ROS_ERROR("Usage:                      pole_tracker <tracker_type> <pole_angle_topic> <pole_angle_offset>");
       ROS_ERROR("Supported tracker types:    particle or gaussian");
       ros::shutdown();
    }
 
    std::string tracker = argv[1];
    std::string pole_topic = argv[2];
+   std::string angle_offset_raw = argv[3];
 
-   PoleTracker driver(node_handle, tracker, pole_topic);
+   PoleTracker driver(node_handle, tracker, pole_topic, angle_offset_raw);
    driver.run();
 }

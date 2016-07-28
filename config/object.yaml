@@ -2,4 +2,4 @@
 object:
   package:    sab_data
   directory:  object_models
-  meshes:     [ balancing_pole_kinect_3_recenter_middle.obj ]
+  meshes:     [ pole_with_two_cubes_1.obj ]
