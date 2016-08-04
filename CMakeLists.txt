@@ -129,16 +129,27 @@ target_link_libraries(${PROJECT_NAME}
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES})
 
-  add_executable(pole_tracker
+   add_executable(pole_tracker
     source/${PROJECT_NAME}/pole_tracker.cpp)
-  add_dependencies(pole_tracker
+   add_dependencies(pole_tracker
     dbot_ros_generate_messages_cpp)
-  target_link_libraries(pole_tracker
+   target_link_libraries(pole_tracker
     ${PROJECT_NAME}
     ${catkin_LIBRARIES}
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
     yaml-cpp)
+
+ add_executable(pole_data_parser
+   source/${PROJECT_NAME}/pole_data_parser.cpp)
+ add_dependencies(pole_data_parser
+   dbot_ros_generate_messages_cpp)
+ target_link_libraries(pole_data_parser
+   ${PROJECT_NAME}
+   ${catkin_LIBRARIES}
+   ${OpenCV_LIBS}
+   ${PCL_LIBRARIES}
+   yaml-cpp)
 
 add_executable(rbc_particle_filter_object_tracker
   source/${PROJECT_NAME}/tracker/rbc_particle_filter_object_tracker_node.cpp)

@@ -19,6 +19,12 @@
 #include <vector>
 #include <cmath>
 #include <stdlib.h>
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <stdio.h>
+#include <time.h>
+#include <array>
 
 #include <ros/ros.h>
 #include <std_msgs/String.h>
@@ -28,6 +34,7 @@
 #include <geometry_msgs/Point.h>
 #include <geometry_msgs/Quaternion.h>
 #include <geometry_msgs/Vector3.h>
+#include <geometry_msgs/TransformStamped.h>
 
 #include <tf/transform_datatypes.h>
 #include <tf2/LinearMath/btMatrix3x3.h>
@@ -35,10 +42,15 @@
 #include <ros/package.h>
 #include <tf/transform_broadcaster.h>
 
-#define PARTICLE_OBJ_TOPIC "/rbc_particle_filter_object_tracker/object_model"
-#define GAUSS_OBJ_TOPIC "/rms_gaussian_filter_object_tracker/object_model"
+#include <dbot_ros_msgs/ObjectState.h>
+
+#define PARTICLE_OBJ_TOPIC "/rbc_particle_filter_object_tracker/object_state"
+#define GAUSS_OBJ_TOPIC "/rms_gaussian_filter_object_tracker/object_state"
 
 #define KINECT_FRAME "/XTION_RGB"
+
+#define VICON_ANGLE_TOPIC "pole_angle"
+#define POLE_ANGLE_VEL_TOPIC "pole_angle_vel_kinect"
 
 #define SIGN 1.0
 #define PI 3.14159265359
@@ -54,10 +66,17 @@ private:
    ros::NodeHandle nh;
    ros::Subscriber object_sub;
    ros::Publisher pole_angle_pub;
+   ros::Publisher pole_angle_vel_pub;
+
+   ros::Publisher VICON_angle_pub;
+   ros::Subscriber VICON_head_sub;
+   double ro, pi, ya;
+   double x, y, z;
 
    // for switching between tracker types and pole_angle topics
    std::string tracker_topic;
    std::string pole_angle_topic;
+   std::string pole_angle_vel_topic;
 
    // for adjusting for angle offset after calibration
    double pole_angle_offset;
@@ -81,6 +100,7 @@ public:
       }
       // save topic to which we are publishing the pole angle
       pole_angle_topic = pole_topic;
+      pole_angle_vel_topic = POLE_ANGLE_VEL_TOPIC;
 
       // set the pole angle offset
       pole_angle_offset = atof(angle_offset.c_str());
@@ -92,38 +112,74 @@ public:
       // start ROS and initialize publisher/subscriber
       start = ros::Time::now();
       nh = node_handle;
-      object_sub = nh.subscribe<visualization_msgs::Marker>(tracker_topic, 1000, &PoleTracker::get_angle_callback, this);
+
+      object_sub = nh.subscribe<dbot_ros_msgs::ObjectState>(tracker_topic, 1000, &PoleTracker::get_angle_and_vel_callback, this);
+      VICON_head_sub = nh.subscribe<geometry_msgs::TransformStamped>("/vicon/apollo_head/apollo_head", 1000, &PoleTracker::get_head_callback, this);
+
       pole_angle_pub = nh.advertise<std_msgs::Float64>(pole_angle_topic, 1000);
+      pole_angle_vel_pub = nh.advertise<std_msgs::Float64>(pole_angle_vel_topic, 1000);
+      VICON_angle_pub = nh.advertise<std_msgs::Float64>("/pole_angle", 1000);
    }
 
-   // gets the angle of the pole
-   void get_angle_callback(const visualization_msgs::Marker::ConstPtr& msg){
+   void get_head_callback(const geometry_msgs::TransformStamped::ConstPtr &msg){
+      // sanity check
+      if(!msg){
+         return;
+      }
+
+      geometry_msgs::Transform transform = msg->transform;
+      geometry_msgs::Vector3 pos = transform.translation;
+      geometry_msgs::Quaternion rot = transform.rotation;
+
+      tf::Quaternion quat;
+      tf::quaternionMsgToTF(rot, quat);
+
+      // the tf::Quaternion has a method to acess roll pitch and yaw
+      double roll, pitch, yaw;
+      tf::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+
+      ro = roll; pi = pitch; ya = yaw;
+      x = pos.x; y = pos.y; z = pos.z;
+   }
+
+   // gets the angle and angular velocity of the pole
+   void get_angle_and_vel_callback(const dbot_ros_msgs::ObjectState::ConstPtr& msg){
       // sanity check in case message corrupt
       if(!msg){
          return;
       }
 
-      // get position and orientation of tracked object
-      geometry_msgs::Point pos = (msg->pose).position;
-      geometry_msgs::Quaternion orient = (msg->pose).orientation;
+      geometry_msgs::PoseStamped obj_pose = msg->pose;
+      geometry_msgs::PoseStamped obj_vel = msg->velocity;
 
-      static tf::TransformBroadcaster br;
-      tf::Transform transform;
-      transform.setOrigin( tf::Vector3(pos.x, pos.y, pos.z) );
+      // get position and orientation of tracked object
+      geometry_msgs::Point pos = obj_pose.pose.position;
+      geometry_msgs::Quaternion orient = obj_pose.pose.orientation;
+
+      // get angular velocity of tracked object
+      geometry_msgs::Quaternion vel_orient = obj_vel.pose.orientation;
 
       // the incoming geometry_msgs::Quaternion is transformed to a tf::Quaterion
-      tf::Quaternion quat;
+      tf::Quaternion quat, vel_quat;
       tf::quaternionMsgToTF(orient, quat);
+      tf::quaternionMsgToTF(vel_orient, vel_quat);
 
       // TODO THIS IS KIND OF HACKEY
       // need to match the kinect frame orientation with the pole frame
-      // so rotate tf quaternion around y and z-axis by 180 degrees to match camera
-      tf::Quaternion rotate_180_yz = tf::createQuaternionFromRPY(0,-PI/6,0);
-      quat = rotate_180_yz * quat;
+      // so rotate tf quaternion around y-axis by 180 degrees to match camera
+      tf::Quaternion rotate_180_y = tf::createQuaternionFromRPY(0,-PI/6,0);
+      quat = rotate_180_y * quat;
+      vel_quat = rotate_180_y * vel_quat;
 
       // the tf::Quaternion has a method to acess roll pitch and yaw
       double roll, pitch, yaw;
       tf::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+
+      // get angular velocity for roll, pitch, and yaw angles
+      // NOTE: using only yaw angle for published angular velocity
+      double vel_roll, vel_pitch, vel_yaw;
+      tf::Matrix3x3(vel_quat).getRPY(vel_roll, vel_pitch, vel_yaw);
+      double final_angle_vel = vel_yaw;
 
       geometry_msgs::Vector3 rpy;
       rpy.x = roll;
@@ -137,7 +193,9 @@ public:
       bool good_roll = (fabs(rpy.x) >= ROLL_BASELINE-CALIB_EPSILON && fabs(rpy.x) <= ROLL_BASELINE+CALIB_EPSILON);
       bool good_pitch = (fabs(rpy.y) >= PITCH_BASELINE-CALIB_EPSILON && fabs(rpy.y) <= PITCH_BASELINE+CALIB_EPSILON);
       bool good_yaw = (fabs(rpy.z) >= YAW_BASELINE-CALIB_EPSILON && fabs(rpy.z) <= YAW_BASELINE+CALIB_EPSILON);
+
       ROS_INFO("pole_angle_offset: %f", pole_angle_offset);
+      ROS_INFO("vel_r: %f, vel_p: %f, vel_y: %f", vel_roll, vel_pitch, vel_yaw);
       ROS_INFO("r: %d, p: %d, y: %d", good_roll, good_pitch, good_yaw);
 
       // a good calibration means that the plane of camera and plane of pole are paralell
@@ -151,7 +209,7 @@ public:
       //    - rad = pole is tilted to left (from camera POV)
       //    0 rad = pole is perfectly vertical
       //    + rad = pole is tilted to right
-      double final_angle = (SIGN*rpy.z)-pole_angle_offset; 
+      double final_angle = (SIGN*rpy.z)-pole_angle_offset;
 
       //ROS_INFO("Quaternion Angle (rad): %f", angle);
       ROS_INFO("              Roll (rad): %f", rpy.x);
@@ -168,13 +226,20 @@ public:
       angle_sum += final_angle;
       num_measurements += 1;
 
-      // publish transform of pole for RVIZ and reference
+      // publish transform of pole coordinate frame for RVIZ visualization
+      static tf::TransformBroadcaster br;
+      tf::Transform transform;
       tf::Quaternion q;
+
+      transform.setOrigin( tf::Vector3(pos.x, pos.y, pos.z) );
       q.setRPY(rpy.x, rpy.y, rpy.z);
       transform.setRotation(q);
       br.sendTransform(tf::StampedTransform(transform, ros::Time::now(), KINECT_FRAME, tracker_topic));
 
+      // publish pole angle and angular velocity
       pole_angle_pub.publish(final_angle);
+      pole_angle_vel_pub.publish(final_angle_vel);
+      //VICON_angle_pub.publish(final_angle-0.02);
    }
 
    void run(){
@@ -207,7 +272,6 @@ public:
          tt_str = "Gaussian";
       }
 
-      // TODO CHECK THIS -- I THINK SOMETHING IS WRONG BECAUSE THE MEASURES ARE TOO LARGE
       std::cout << std::endl;
       std::cout << "------------ " << tt_str << " EXPERIMENTAL RESULTS -----------" << std::endl;
       std::cout << "             Duration (secs): " << (end-start) << std::endl;
@@ -218,6 +282,11 @@ public:
       std::cout << "                       (deg): " << (std_dev*180/PI) << std::endl;
       std::cout << "------------------------------------------------------" << std::endl;
       std::cout << std::endl;
+
+      std::cout << "-------------Measured tf for apollo_head:---------------" << std::endl;
+      std::cout << "x: " << x << ", y: " << y << ", z: " << z << std::endl;
+      std::cout << "ro: " << ro << ", pi: " << pi << ", ya: " << ya << std::endl;
+      std::cout << "--------------------------------------------------------" << std::endl;
 
       angle_data.clear();
    }

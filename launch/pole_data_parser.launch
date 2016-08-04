@@ -1,0 +1,8 @@
+<launch>
+   <arg name="rosbag_dir" default="/Network/Servers/tohaku/Volumes/tohaku/abajcsy/amd-clmc-ws/workspace/src/catkin/ros/dbot_ros/rosbag/"/>
+   <arg name="v_out_filename" default="/Network/Servers/tohaku/Volumes/tohaku/abajcsy/amd-clmc-ws/workspace/src/catkin/ros/dbot_ros/vicon_angles.txt"/>
+   <arg name="k_out_filename" default="/Network/Servers/tohaku/Volumes/tohaku/abajcsy/amd-clmc-ws/workspace/src/catkin/ros/dbot_ros/kinect_angles.txt"/>
+
+   <node name="pole_data_parser" pkg="dbot_ros" type="pole_data_parser" output="screen"
+         args="$(arg rosbag_dir) $(arg v_out_filename) $(arg k_out_filename)"/>
+</launch>
