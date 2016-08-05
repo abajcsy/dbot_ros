@@ -4,6 +4,7 @@ To change the arguments when running through command line type:
 -->
 
 <launch>
+
    <!-- for particle filter tracking: particle
         for gaussian filter tracking: gaussian -->
    <arg name="tracker_type" default="particle"/>

@@ -1,0 +1,21 @@
+<!--
+To change the arguments when running through command line type:
+      roslaunch dbot_ros pole_tracker.launch tracker_type:=particle pole_angle_topic:=pole_angle
+-->
+
+<launch>
+
+   <!-- launch rviz -->
+   <node name="rviz" pkg="rviz" type="rviz" />
+
+   <!-- start depth camera -->
+   <include file="$(find rgbd_capture)/launch/rgbd_capture.launch"/>
+
+   <!-- start object tracking -->
+   <!--<include file="$(find dbot_ros)/launch/rbc_particle_filter_object_tracker.launch"/>-->
+   <include file="$(find dbot_ros)/launch/rms_gaussian_filter_object_tracker.launch"/>
+
+   <!-- start angle estimation -->
+   <include file="$(find dbot_ros)/launch/pole_tracker.launch"/>
+
+</launch>

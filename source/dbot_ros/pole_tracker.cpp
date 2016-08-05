@@ -52,13 +52,17 @@
 #define VICON_ANGLE_TOPIC "pole_angle"
 #define POLE_ANGLE_VEL_TOPIC "pole_angle_vel_kinect"
 
-#define SIGN 1.0
-#define PI 3.14159265359
+#define SIGN               1.0
+#define PI                 3.14159265359
 
-#define ROLL_BASELINE 1.5708
-#define PITCH_BASELINE 0.0
-#define YAW_BASELINE 0.0
-#define CALIB_EPSILON 0.03
+#define ROLL_BASELINE      1.5708
+#define PITCH_BASELINE     0.0
+#define YAW_BASELINE       0.0
+#define CALIB_EPSILON      0.03
+
+// values for adjusting the kinect angle with respect to VICON (gathered empirically)
+#define SLOPE              0.703053333333333
+#define OFFSET             -0.008968266666667
 
 class PoleTracker{
 
@@ -68,7 +72,7 @@ private:
    ros::Publisher pole_angle_pub;
    ros::Publisher pole_angle_vel_pub;
 
-   ros::Publisher VICON_angle_pub;
+   // for collecting data on the transform of Apollo's kinect
    ros::Subscriber VICON_head_sub;
    double ro, pi, ya;
    double x, y, z;
@@ -80,6 +84,9 @@ private:
 
    // for adjusting for angle offset after calibration
    double pole_angle_offset;
+
+   ros::Publisher VICON_angle_pub;
+   ros::Publisher Kinect_angle_pub;
 
    // for keeping basic metrics about angle measurements
    double num_measurements;
@@ -118,7 +125,6 @@ public:
 
       pole_angle_pub = nh.advertise<std_msgs::Float64>(pole_angle_topic, 1000);
       pole_angle_vel_pub = nh.advertise<std_msgs::Float64>(pole_angle_vel_topic, 1000);
-      VICON_angle_pub = nh.advertise<std_msgs::Float64>("/pole_angle", 1000);
    }
 
    void get_head_callback(const geometry_msgs::TransformStamped::ConstPtr &msg){
@@ -140,6 +146,12 @@ public:
 
       ro = roll; pi = pitch; ya = yaw;
       x = pos.x; y = pos.y; z = pos.z;
+   }
+
+   // adjusts the kinect angle to closer match VICON based on a linear regression
+   // computed from VICON and Kinect angle measurements of various pole angles
+   double adjust_kinect_angle(double kinect_angle){
+      return (kinect_angle*SLOPE + OFFSET);
    }
 
    // gets the angle and angular velocity of the pole
@@ -209,7 +221,11 @@ public:
       //    - rad = pole is tilted to left (from camera POV)
       //    0 rad = pole is perfectly vertical
       //    + rad = pole is tilted to right
+
       double final_angle = (SIGN*rpy.z)-pole_angle_offset;
+      ROS_INFO("      Raw Kinect angle: %f", final_angle);
+      final_angle = adjust_kinect_angle(final_angle);
+      ROS_INFO(" Adjusted Kinect angle: %f", final_angle);
 
       //ROS_INFO("Quaternion Angle (rad): %f", angle);
       ROS_INFO("              Roll (rad): %f", rpy.x);
@@ -239,7 +255,6 @@ public:
       // publish pole angle and angular velocity
       pole_angle_pub.publish(final_angle);
       pole_angle_vel_pub.publish(final_angle_vel);
-      //VICON_angle_pub.publish(final_angle-0.02);
    }
 
    void run(){
@@ -283,10 +298,10 @@ public:
       std::cout << "------------------------------------------------------" << std::endl;
       std::cout << std::endl;
 
-      std::cout << "-------------Measured tf for apollo_head:---------------" << std::endl;
+      std::cout << "-------------- Measured Transform for apollo_head: ---------------" << std::endl;
       std::cout << "x: " << x << ", y: " << y << ", z: " << z << std::endl;
       std::cout << "ro: " << ro << ", pi: " << pi << ", ya: " << ya << std::endl;
-      std::cout << "--------------------------------------------------------" << std::endl;
+      std::cout << "-----------------------------------------------------------------" << std::endl;
 
       angle_data.clear();
    }
@@ -307,6 +322,7 @@ int main(int argc, char** argv) {
    std::string tracker = argv[1];
    std::string pole_topic = argv[2];
    std::string angle_offset_raw = argv[3];
+   std::cout << "angle_offset_raw: " << angle_offset_raw << std::endl;
 
    PoleTracker driver(node_handle, tracker, pole_topic, angle_offset_raw);
    driver.run();

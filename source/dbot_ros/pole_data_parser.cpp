@@ -30,7 +30,6 @@
 #include <ros/ros.h>
 #include <std_msgs/String.h>
 #include <std_msgs/Float64.h>
-#include <visualization_msgs/Marker.h>
 
 #include <rosbag/bag.h>
 #include <rosbag/view.h>
@@ -40,14 +39,6 @@
 #include <boost/foreach.hpp>
 #include <dirent.h>
 
-#include <geometry_msgs/Point.h>
-#include <geometry_msgs/Quaternion.h>
-#include <geometry_msgs/Vector3.h>
-#include <geometry_msgs/TransformStamped.h>
-
-#include <tf/transform_datatypes.h>
-#include <tf2/LinearMath/btMatrix3x3.h>
-
 #include <ros/package.h>
 
 #define foreach BOOST_FOREACH
@@ -56,13 +47,6 @@ class PoleDataParser{
 
 private:
    ros::NodeHandle nh;
-
-   // for testing offset between VICON and Kinect angle estimation
-   //ros::Subscriber VICON_angle_sub;
-   //ros::Subscriber Kinect_angle_sub;
-
-   //std::array<std::vector<double>,2> vicon_angle_data;
-   //std::array<std::vector<double>,2> kinect_angle_data;
 
    // for switching between tracker types and pole_angle topics
    std::string vicon_topic;
@@ -85,9 +69,6 @@ public:
       this->vicon_out_filename = vicon_out_filename;
       this->kinect_out_filename = kinect_out_filename;
 
-      // start ROS and initialize publisher/subscriber
-      //nh = node_handle;
-
       // open data files for writing
       v_file.open(vicon_out_filename, std::fstream::in | std::fstream::out | std::fstream::trunc);
       k_file.open(kinect_out_filename, std::fstream::in | std::fstream::out | std::fstream::trunc);
@@ -100,9 +81,6 @@ public:
          v_file << "theta time VICON_theta\n";
          k_file << "theta time Kinect_theta\n";
       }
-      //VICON_angle_sub = nh.subscribe<std_msgs::Float64>(vicon_topic, 1000, &PoleDataParser::get_vicon_angle_callback, this);
-      //Kinect_angle_sub = nh.subscribe<std_msgs::Float64>(kinect_topic, 1000, &PoleDataParser::get_kinect_angle_callback, this);
-
    }
 
    /**
@@ -122,6 +100,8 @@ public:
       struct dirent *epdf;
       std::vector<std::string> files;
       dpdf = opendir(rosbag_dir.c_str());
+
+      // get all the names of the rosbags from the given rosbag directory
       if (dpdf != NULL){
          while (epdf = readdir(dpdf)){
             std::string fname = epdf->d_name;
@@ -142,6 +122,7 @@ public:
             }
          }
       }
+
       for(int i = 0; i < files.size(); i+=1){
          // get the amount of degrees this file is measuring
          std::stringstream curr_file(files.at(i));
@@ -174,7 +155,6 @@ public:
          bool firsttime = true;
          double offset;
          foreach(rosbag::MessageInstance const m, view){
-
             if (firsttime){
                offset = m.getTime().toSec();
                firsttime = false;
@@ -215,7 +195,7 @@ int main(int argc, char** argv) {
 
    if(argc != 4){
       ROS_ERROR("Not enough arguments!");
-      ROS_ERROR("Usage:                      pole_data_parser <rosbag_dir> <v_out_filename> <k_out_filename>");
+      ROS_ERROR("Usage:  pole_data_parser <rosbag_dir> <v_out_filename> <k_out_filename>");
       ros::shutdown();
    }
 
